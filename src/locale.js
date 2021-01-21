@@ -4,8 +4,9 @@ import formatNumerals from "./formatNumerals.js";
 import formatSpecifier from "./formatSpecifier.js";
 import formatTrim from "./formatTrim.js";
 import formatTypes from "./formatTypes.js";
-import {prefixExponent} from "./formatPrefixAuto.js";
-import identity from "./identity.js";
+import { createPrefixOrderAutoForLocale, createPrefixExponentAutoForLocale } from './formatPrefixAuto.js';
+import identity from './identity.js';
+import formatDecimal from "./formatDecimal.js";
 
 var map = Array.prototype.map,
     SIprefixes = ["y","z","a","f","p","n","µ","m","","k","M","G","T","P","E","Z","Y"],
@@ -20,8 +21,9 @@ export default function(locale) {
       numerals = locale.numerals === undefined ? identity : formatNumerals(map.call(locale.numerals, String)),
       percent = locale.percent === undefined ? "%" : locale.percent + "",
       minus = locale.minus === undefined ? "-" : locale.minus + "",
-      nan = locale.nan === undefined ? "NaN" : locale.nan + "";
-
+      nan = locale.nan === undefined ? 'NaN' : locale.nan + '',
+      grouping = locale.grouping === undefined ? [3] : locale.grouping;
+  
   function newFormat(specifier) {
     specifier = formatSpecifier(specifier);
 
@@ -57,7 +59,16 @@ export default function(locale) {
         maybeSuffix = /[defgKprs%]/.test(type);
 
     if (type === 'K')
-      formatType = formatType(currencyAbbreviations);
+      formatType = formatType(currencyAbbreviations, grouping);
+
+    let calc_prefix_exp
+    if (type === 's') calc_prefix_exp = createPrefixExponentAutoForLocale(-8, 8,grouping);
+    else if (type === 'K') calc_prefix_exp = createPrefixExponentAutoForLocale(0, currencyAbbreviations.length - 1,grouping);
+
+    let calc_prefix_order
+    if (type === 's') calc_prefix_order = createPrefixOrderAutoForLocale(-8, 8,grouping);
+    else if (type === 'K') calc_prefix_order = createPrefixOrderAutoForLocale(0, currencyAbbreviations.length - 1,grouping);
+
 
     // Set the default precision if not specified,
     // or clamp the specified precision to the supported range.
@@ -81,6 +92,7 @@ export default function(locale) {
 
         // Perform the initial formatting.
         var valueNegative = value < 0;
+        let orig_value = isNaN(value) ? nan : value;
         value = isNaN(value) ? nan : formatType(Math.abs(value), precision);
 
         // Trim insignificant zeros.
@@ -92,10 +104,14 @@ export default function(locale) {
         // Compute the prefix and suffix.
         valuePrefix = (valueNegative ? (sign === "(" ? sign : minus) : sign === "-" || sign === "(" ? "" : sign) + valuePrefix;
 
-        if (type === "s")
-          valueSuffix = SIprefixes[8 + prefixExponent / 3] + valueSuffix
-        else if (type === "K")
-          valueSuffix = currencyAbbreviations[prefixExponent / 3] + valueSuffix
+        if(type === 's' || type === 'K'){
+          let d = formatDecimal(Math.abs(orig_value), precision);
+          let exponent = d[1]
+          // console.log(type,exponent,calc_prefix_exp(exponent))
+
+          if (type === 's') valueSuffix = SIprefixes[-1 * -8 + calc_prefix_order(calc_prefix_exp(exponent))] + valueSuffix;
+          else if (type === 'K') valueSuffix = currencyAbbreviations[-1 * 0 + calc_prefix_order(calc_prefix_exp(exponent))] + valueSuffix;
+        }
 
         valueSuffix = valueSuffix + (valueNegative && sign === "(" ? ")" : "");
 
@@ -141,18 +157,30 @@ export default function(locale) {
     return format;
   }
 
+
+  // function precise(x) {
+  //   return Number.parseFloat(x).toPrecision(4);
+  // }
+
   function createFormatPrefix(prefixes, minimumPrefixOrder, maximumPrefixOrder) {
+    let calc_prefix_exp = createPrefixExponentAutoForLocale(minimumPrefixOrder, maximumPrefixOrder,grouping)
+    let calc_prefix_order = createPrefixOrderAutoForLocale(minimumPrefixOrder, maximumPrefixOrder,grouping);
+
     return function(specifier, value) {
-      var f = newFormat((specifier = formatSpecifier(specifier), specifier.type = "f", specifier)),
-        e = Math.max(minimumPrefixOrder, Math.min(maximumPrefixOrder, Math.floor(exponent(value) / 3))) * 3,
-        k = Math.pow(10, -e),
-        prefix = prefixes[(-1 * minimumPrefixOrder) + e / 3];
-      return function (value) {
+      var exp_value = exponent(value);
+      let e, k, prefix, f;
+      f = newFormat(((specifier = formatSpecifier(specifier)), (specifier.type = 'f'), specifier));
+
+      e =	calc_prefix_exp(exp_value);
+      k = Math.pow(10, -e);
+      let prefix_order = calc_prefix_order(e)
+
+      prefix = prefixes[-1 * minimumPrefixOrder + prefix_order];
+      return function(value) {
         return f(k * value) + prefix;
       };
-    }
+    };
   }
-
   var formatPrefix = createFormatPrefix(SIprefixes, -8, 8);
   var formatCurrencyPrefix = createFormatPrefix(currencyAbbreviations, 0, currencyAbbreviations.length - 1);
 
