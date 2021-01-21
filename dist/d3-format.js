@@ -1,9 +1,9 @@
-// https://d3js.org/d3-format/ v1.4.2 Copyright 2019 Mike Bostock
+// https://d3js.org/d3-format/ v1.4.3 Copyright 2021 Mike Bostock
 (function (global, factory) {
 typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) :
 typeof define === 'function' && define.amd ? define(['exports'], factory) :
 (global = global || self, factory(global.d3 = global.d3 || {}));
-}(this, function (exports) { 'use strict';
+}(this, (function (exports) { 'use strict';
 
 // Computes the decimal coefficient and exponent of the specified number x with
 // significant digits p, where x is positive and p is in [1, 21] or undefined.
@@ -121,14 +121,48 @@ function formatTrim(s) {
   return i0 > 0 ? s.slice(0, i0) + s.slice(i1 + 1) : s;
 }
 
-var prefixExponent;
+function get_exponent_from_prefix_order(prefix_order, grouping, exp_bases){
+  let grouping_length = grouping.length;
 
-function formatSignificantDigitsForPrefixes(x, p, minPrefixOrder, maxPrefixOrder) {
+  let val = Math.floor(prefix_order/grouping_length)*exp_bases[exp_bases.length-1] + exp_bases[prefix_order%grouping_length];
+  return val
+}
+
+function get_appropriate_prefix_order(minimumPrefixOrder, maximumPrefixOrder, exp_value, grouping, exp_bases){
+  let prefix_order = minimumPrefixOrder;
+  for (let index = minimumPrefixOrder; index <= maximumPrefixOrder; index++) {
+    const base = get_exponent_from_prefix_order(index, grouping, exp_bases);
+    if (exp_value >= base){
+      prefix_order = index;
+      continue
+    }
+    break
+  }
+  return Math.max(minimumPrefixOrder, Math.min(maximumPrefixOrder, prefix_order))
+}
+
+function calculate_prefix_exponent(minimumPrefixOrder, maximumPrefixOrder, exp_value, grouping, exp_bases){
+  let prefix_order = get_appropriate_prefix_order(minimumPrefixOrder, maximumPrefixOrder, exp_value, grouping, exp_bases);
+  return get_exponent_from_prefix_order(prefix_order,grouping, exp_bases);
+}
+
+function calculate_exponent_bases(grouping){
+  let exp_bases = [0];
+	let base = 0;
+	for (let index = 0; index < grouping.length; index++) {
+		const item = grouping[index];
+		base = base + item;
+		exp_bases.push(base);
+  }
+  return exp_bases
+}
+
+function formatSignificantDigitsForPrefixes(x, p, calc_prefix_exp) {
   var d = formatDecimal(x, p);
   if (!d) return x + "";
   var coefficient = d[0],
       exponent = d[1],
-      i = exponent - (prefixExponent = Math.max(minPrefixOrder, Math.min(maxPrefixOrder, Math.floor(exponent / 3))) * 3) + 1,
+      i = exponent - (calc_prefix_exp(exponent)) + 1,
       n = coefficient.length;
   return i === n ? coefficient
       : i > n ? coefficient + new Array(i - n + 1).join("0")
@@ -136,14 +170,34 @@ function formatSignificantDigitsForPrefixes(x, p, minPrefixOrder, maxPrefixOrder
       : "0." + new Array(1 - i).join("0") + formatDecimal(x, Math.max(0, p + i - 1))[0]; // less than the smallest prefix
 }
 
-function createFormatCurrencyPrefixAutoForLocale(currencyAbbreviations) {
+function createPrefixExponentAutoForLocale(minimumPrefixOrder, maximumPrefixOrder, grouping){
+  let exp_bases = calculate_exponent_bases(grouping);
+  
+  return function calculateCurrencyPrefixAuto(exp_value) {
+    return calculate_prefix_exponent(minimumPrefixOrder, maximumPrefixOrder, exp_value, grouping, exp_bases);
+  }
+}
+
+function createPrefixOrderAutoForLocale(minimumPrefixOrder, maximumPrefixOrder, grouping){
+  let exp_bases = calculate_exponent_bases(grouping);
+  
+  return function calculatePrefixOrderAuto(exp_value) {
+    return get_appropriate_prefix_order(minimumPrefixOrder, maximumPrefixOrder, exp_value, grouping, exp_bases);
+  }
+}
+
+function createFormatCurrencyPrefixAutoForLocale(currencyAbbreviations, grouping) {
+
+	let calc_prefix_exp = createPrefixExponentAutoForLocale(0, currencyAbbreviations.length - 1,grouping);
+  
   return function formatCurrencyPrefixAuto(x, p) {
-    return formatSignificantDigitsForPrefixes(x, p, 0, currencyAbbreviations.length - 1);
+    return formatSignificantDigitsForPrefixes(x, p, calc_prefix_exp);
   }
 }
 
 function formatPrefixAuto(x, p) {
-  return formatSignificantDigitsForPrefixes(x, p, -8, 8);
+	let calc_prefix_exp = createPrefixExponentAutoForLocale(-8, 8, [3]);
+  return formatSignificantDigitsForPrefixes(x, p, calc_prefix_exp);
 }
 
 function formatRounded(x, p) {
@@ -190,8 +244,9 @@ function formatLocale(locale) {
       numerals = locale.numerals === undefined ? identity : formatNumerals(map.call(locale.numerals, String)),
       percent = locale.percent === undefined ? "%" : locale.percent + "",
       minus = locale.minus === undefined ? "-" : locale.minus + "",
-      nan = locale.nan === undefined ? "NaN" : locale.nan + "";
-
+      nan = locale.nan === undefined ? 'NaN' : locale.nan + '',
+      grouping = locale.grouping === undefined ? [3] : locale.grouping;
+  
   function newFormat(specifier) {
     specifier = formatSpecifier(specifier);
 
@@ -227,7 +282,16 @@ function formatLocale(locale) {
         maybeSuffix = /[defgKprs%]/.test(type);
 
     if (type === 'K')
-      formatType = formatType(currencyAbbreviations);
+      formatType = formatType(currencyAbbreviations, grouping);
+
+    let calc_prefix_exp;
+    if (type === 's') calc_prefix_exp = createPrefixExponentAutoForLocale(-8, 8,grouping);
+    else if (type === 'K') calc_prefix_exp = createPrefixExponentAutoForLocale(0, currencyAbbreviations.length - 1,grouping);
+
+    let calc_prefix_order;
+    if (type === 's') calc_prefix_order = createPrefixOrderAutoForLocale(-8, 8,grouping);
+    else if (type === 'K') calc_prefix_order = createPrefixOrderAutoForLocale(0, currencyAbbreviations.length - 1,grouping);
+
 
     // Set the default precision if not specified,
     // or clamp the specified precision to the supported range.
@@ -251,6 +315,7 @@ function formatLocale(locale) {
 
         // Perform the initial formatting.
         var valueNegative = value < 0;
+        let orig_value = isNaN(value) ? nan : value;
         value = isNaN(value) ? nan : formatType(Math.abs(value), precision);
 
         // Trim insignificant zeros.
@@ -262,10 +327,14 @@ function formatLocale(locale) {
         // Compute the prefix and suffix.
         valuePrefix = (valueNegative ? (sign === "(" ? sign : minus) : sign === "-" || sign === "(" ? "" : sign) + valuePrefix;
 
-        if (type === "s")
-          valueSuffix = SIprefixes[8 + prefixExponent / 3] + valueSuffix;
-        else if (type === "K")
-          valueSuffix = currencyAbbreviations[prefixExponent / 3] + valueSuffix;
+        if(type === 's' || type === 'K'){
+          let d = formatDecimal(Math.abs(orig_value), precision);
+          let exponent = d[1];
+          // console.log(type,exponent,calc_prefix_exp(exponent))
+
+          if (type === 's') valueSuffix = SIprefixes[-1 * -8 + calc_prefix_order(calc_prefix_exp(exponent))] + valueSuffix;
+          else if (type === 'K') valueSuffix = currencyAbbreviations[-1 * 0 + calc_prefix_order(calc_prefix_exp(exponent))] + valueSuffix;
+        }
 
         valueSuffix = valueSuffix + (valueNegative && sign === "(" ? ")" : "");
 
@@ -311,18 +380,30 @@ function formatLocale(locale) {
     return format;
   }
 
+
+  // function precise(x) {
+  //   return Number.parseFloat(x).toPrecision(4);
+  // }
+
   function createFormatPrefix(prefixes, minimumPrefixOrder, maximumPrefixOrder) {
+    let calc_prefix_exp = createPrefixExponentAutoForLocale(minimumPrefixOrder, maximumPrefixOrder,grouping);
+    let calc_prefix_order = createPrefixOrderAutoForLocale(minimumPrefixOrder, maximumPrefixOrder,grouping);
+
     return function(specifier, value) {
-      var f = newFormat((specifier = formatSpecifier(specifier), specifier.type = "f", specifier)),
-        e = Math.max(minimumPrefixOrder, Math.min(maximumPrefixOrder, Math.floor(exponent(value) / 3))) * 3,
-        k = Math.pow(10, -e),
-        prefix = prefixes[(-1 * minimumPrefixOrder) + e / 3];
-      return function (value) {
+      var exp_value = exponent(value);
+      let e, k, prefix, f;
+      f = newFormat(((specifier = formatSpecifier(specifier)), (specifier.type = 'f'), specifier));
+
+      e =	calc_prefix_exp(exp_value);
+      k = Math.pow(10, -e);
+      let prefix_order = calc_prefix_order(e);
+
+      prefix = prefixes[-1 * minimumPrefixOrder + prefix_order];
+      return function(value) {
         return f(k * value) + prefix;
       };
-    }
+    };
   }
-
   var formatPrefix = createFormatPrefix(SIprefixes, -8, 8);
   var formatCurrencyPrefix = createFormatPrefix(currencyAbbreviations, 0, currencyAbbreviations.length - 1);
 
@@ -371,4 +452,4 @@ exports.precisionRound = precisionRound;
 
 Object.defineProperty(exports, '__esModule', { value: true });
 
-}));
+})));
