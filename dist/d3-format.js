@@ -1,4 +1,4 @@
-// https://d3js.org/d3-format/ v1.4.3 Copyright 2021 Mike Bostock
+// https://d3js.org/d3-format/ v1.4.4 Copyright 2021 Mike Bostock
 (function (global, factory) {
 typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) :
 typeof define === 'function' && define.amd ? define(['exports'], factory) :
@@ -285,11 +285,11 @@ function formatLocale(locale) {
       formatType = formatType(currencyAbbreviations, grouping);
 
     let calc_prefix_exp;
-    if (type === 's') calc_prefix_exp = createPrefixExponentAutoForLocale(-8, 8,grouping);
+    if (type === 's') calc_prefix_exp = createPrefixExponentAutoForLocale(-8, 8,[3]);
     else if (type === 'K') calc_prefix_exp = createPrefixExponentAutoForLocale(0, currencyAbbreviations.length - 1,grouping);
 
     let calc_prefix_order;
-    if (type === 's') calc_prefix_order = createPrefixOrderAutoForLocale(-8, 8,grouping);
+    if (type === 's') calc_prefix_order = createPrefixOrderAutoForLocale(-8, 8,[3]);
     else if (type === 'K') calc_prefix_order = createPrefixOrderAutoForLocale(0, currencyAbbreviations.length - 1,grouping);
 
 
@@ -385,11 +385,11 @@ function formatLocale(locale) {
   //   return Number.parseFloat(x).toPrecision(4);
   // }
 
-  function createFormatPrefix(prefixes, minimumPrefixOrder, maximumPrefixOrder) {
-    let calc_prefix_exp = createPrefixExponentAutoForLocale(minimumPrefixOrder, maximumPrefixOrder,grouping);
-    let calc_prefix_order = createPrefixOrderAutoForLocale(minimumPrefixOrder, maximumPrefixOrder,grouping);
+  function createFormatPrefix(prefixes, minimumPrefixOrder, maximumPrefixOrder, grouping) {
+    let calc_prefix_exp = createPrefixExponentAutoForLocale(minimumPrefixOrder, maximumPrefixOrder, grouping);
+    let calc_prefix_order = createPrefixOrderAutoForLocale(minimumPrefixOrder, maximumPrefixOrder, grouping);
 
-    return function(specifier, value) {
+      return function(specifier, value) {
       var exp_value = exponent(value);
       let e, k, prefix, f;
       f = newFormat(((specifier = formatSpecifier(specifier)), (specifier.type = 'f'), specifier));
@@ -404,8 +404,9 @@ function formatLocale(locale) {
       };
     };
   }
-  var formatPrefix = createFormatPrefix(SIprefixes, -8, 8);
-  var formatCurrencyPrefix = createFormatPrefix(currencyAbbreviations, 0, currencyAbbreviations.length - 1);
+
+  var formatPrefix = createFormatPrefix(SIprefixes, -8, 8, [3]);
+  var formatCurrencyPrefix = createFormatPrefix(currencyAbbreviations, 0, currencyAbbreviations.length - 1, grouping);
 
   return {
     format: newFormat,
